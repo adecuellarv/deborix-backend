@@ -1,5 +1,6 @@
 import { leadSchema } from "@/lib/validations/lead";
 import { createSupabaseAdmin } from "@/lib/supabase/admin";
+import { sendLeadNotification } from "@/lib/resend/lead-notification";
 
 type ValidationErrors = Record<string, string[] | undefined>;
 
@@ -22,11 +23,18 @@ const databaseErrorResponse = () =>
     { status: 500 },
   );
 
-const logDatabaseErrorCode = (operation: "insert" | "duplicate_lookup", code?: string) => {
+const logDatabaseErrorCode = (
+  operation: "insert" | "duplicate_lookup" | "notification_update",
+  code?: string,
+) => {
   console.error("[api/leads] Supabase operation failed", {
     operation,
     code: code || "UNKNOWN",
   });
+};
+
+const logNotificationErrorCode = (code: string) => {
+  console.error("[api/leads] Resend notification failed", { code });
 };
 
 export const POST = async (request: Request) => {
@@ -65,6 +73,37 @@ export const POST = async (request: Request) => {
       .single();
 
     if (!insertError && createdLead) {
+      const notificationResult = await sendLeadNotification({
+        ...lead,
+        id: createdLead.id,
+      });
+      const { error: notificationUpdateError } = await supabase
+        .from("leads")
+        .update(
+          notificationResult.success
+            ? {
+                notification_status: "sent",
+                notification_error: null,
+                notification_attempts: 1,
+                notified_at: new Date().toISOString(),
+              }
+            : {
+                notification_status: "failed",
+                notification_error: notificationResult.code,
+                notification_attempts: 1,
+                notified_at: null,
+              },
+        )
+        .eq("id", createdLead.id);
+
+      if (!notificationResult.success) {
+        logNotificationErrorCode(notificationResult.code);
+      }
+
+      if (notificationUpdateError) {
+        logDatabaseErrorCode("notification_update", notificationUpdateError.code);
+      }
+
       return Response.json(
         {
           success: true,
