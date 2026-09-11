@@ -1,4 +1,5 @@
 import { leadSchema } from "@/lib/validations/lead";
+import { createSupabaseAdmin } from "@/lib/supabase/admin";
 
 type ValidationErrors = Record<string, string[] | undefined>;
 
@@ -10,6 +11,15 @@ const invalidRequestResponse = (errors: ValidationErrors) =>
       errors,
     },
     { status: 400 },
+  );
+
+const databaseErrorResponse = () =>
+  Response.json(
+    {
+      success: false,
+      message: "No pudimos guardar la información. Intenta nuevamente.",
+    },
+    { status: 500 },
   );
 
 export const POST = async (request: Request) => {
@@ -29,12 +39,60 @@ export const POST = async (request: Request) => {
     return invalidRequestResponse(validationResult.error.flatten().fieldErrors);
   }
 
-  return Response.json(
-    {
-      success: true,
-      message: "Lead recibido correctamente",
-      leadId: crypto.randomUUID(),
-    },
-    { status: 201 },
-  );
+  const lead = validationResult.data;
+
+  try {
+    const supabase = createSupabaseAdmin();
+    const { data: createdLead, error: insertError } = await supabase
+      .from("leads")
+      .insert({
+        project_type: lead.projectType,
+        estimated_budget: lead.estimatedBudget,
+        contact_name: lead.contactName,
+        email: lead.email,
+        phone: lead.phone,
+        message: lead.message,
+        idempotency_key: lead.idempotencyKey,
+      })
+      .select("id")
+      .single();
+
+    if (!insertError && createdLead) {
+      return Response.json(
+        {
+          success: true,
+          message: "Lead recibido correctamente",
+          leadId: createdLead.id,
+          duplicate: false,
+        },
+        { status: 201 },
+      );
+    }
+
+    if (insertError?.code !== "23505") {
+      return databaseErrorResponse();
+    }
+
+    const { data: existingLead, error: lookupError } = await supabase
+      .from("leads")
+      .select("id")
+      .eq("idempotency_key", lead.idempotencyKey)
+      .maybeSingle();
+
+    if (lookupError || !existingLead) {
+      return databaseErrorResponse();
+    }
+
+    return Response.json(
+      {
+        success: true,
+        message: "La información ya había sido recibida",
+        leadId: existingLead.id,
+        duplicate: true,
+      },
+      { status: 200 },
+    );
+  } catch {
+    return databaseErrorResponse();
+  }
 };

@@ -16,6 +16,7 @@ type LeadSuccessResponse = {
   success: true;
   message: string;
   leadId: string;
+  duplicate: boolean;
 };
 
 type LeadErrorResponse = {
@@ -83,7 +84,7 @@ export const LeadForm = () => {
     try {
       const response = await axios.post<LeadSuccessResponse>("/api/leads", payload);
 
-      if (response.status !== 201 || !response.data.success) {
+      if (![200, 201].includes(response.status) || !response.data.success) {
         setErrorMessage("No pudimos enviar la información. Intenta nuevamente.");
         return;
       }
