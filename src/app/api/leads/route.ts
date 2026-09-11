@@ -22,6 +22,13 @@ const databaseErrorResponse = () =>
     { status: 500 },
   );
 
+const logDatabaseErrorCode = (operation: "insert" | "duplicate_lookup", code?: string) => {
+  console.error("[api/leads] Supabase operation failed", {
+    operation,
+    code: code || "UNKNOWN",
+  });
+};
+
 export const POST = async (request: Request) => {
   let body: unknown;
 
@@ -70,6 +77,7 @@ export const POST = async (request: Request) => {
     }
 
     if (insertError?.code !== "23505") {
+      logDatabaseErrorCode("insert", insertError?.code);
       return databaseErrorResponse();
     }
 
@@ -80,6 +88,7 @@ export const POST = async (request: Request) => {
       .maybeSingle();
 
     if (lookupError || !existingLead) {
+      logDatabaseErrorCode("duplicate_lookup", lookupError?.code);
       return databaseErrorResponse();
     }
 
@@ -93,6 +102,7 @@ export const POST = async (request: Request) => {
       { status: 200 },
     );
   } catch {
+    logDatabaseErrorCode("insert");
     return databaseErrorResponse();
   }
 };
